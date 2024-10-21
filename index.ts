@@ -31,136 +31,40 @@ async function extractKeysFromMyTonWalletMultiChainMnemonic(mnemonic: string, in
 
 }
 
-class TONX {
-  network: 'testnet' | 'mainnet'
-  apiKey: string
-  endpoint: string
-
-  constructor(apiKey: string, network: 'testnet' | 'mainnet', version: string = 'v2') {
-    this.apiKey = apiKey
-    this.network = network
-    this.endpoint = `https://${network}-rpc.tonxapi.com/${version}/json-rpc/${apiKey}`
-  }
-
-
-  async runGetMethod(address: string, method: string, stack: any[]) {
-    const response = await fetch(this.endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        id: '1',
-        jsonrpc: '2.0',
-        method: 'runGetMethod',
-        params: {
-          address,
-          method,
-          stack,
-        },
-      }),
-    })
-    const data = await response.json() as any
-    return data.result 
-  }
-
-
-}
-
-
 class Wallet {
-  contract: WalletContractV4
+  contract: WalletContractV4|WalletContractV5R1
   keyPair: KeyPair
 
-  constructor(keyPair: KeyPair) {
-    const wallet = WalletContractV4.create({
+  constructor(keyPair: KeyPair, type: WalletType) {
+    if(type === WalletType.NormalV4 ||type ===  WalletType.Ledger){
+      const wallet = WalletContractV4.create({
+        workchain: 0,
+        publicKey: keyPair.publicKey,
+      })
+      this.contract = wallet
+      this.keyPair = keyPair    
+  }else if(type === WalletType.MyTonWalletMultiChain){
+    const wallet = WalletContractV5R1.create({
       workchain: 0,
       publicKey: keyPair.publicKey,
     })
     this.contract = wallet
     this.keyPair = keyPair
   }
+}
 
-  static async init(mnemonic: string){
+  static async init(mnemonic: string, type: WalletType) {
     const mnemonicStringArray = mnemonic.split(' ')
     const keyPair = await mnemonicToPrivateKey(mnemonicStringArray)
-    return new Wallet(keyPair)
+    return new Wallet(keyPair, type)
   }
 
-  async getSeqno(client: TONX) {
-    const response = await client.runGetMethod(this.contract.address.toString(), 'seqno', [])
-    const seqnoHex = response.result.stack[0][1]
-    const seqno = Number.parseInt(seqnoHex, 16)
-    return seqno
-  }
 
   rawSign(orderHashHex: string) {
     const signature = sign(Buffer.from(orderHashHex, 'hex'), this.keyPair.secretKey)
     return {
       buffer: signature,
       signatureHex: signature.toString('hex'),
-    }
-    // const signature = nacl.sign.detached(hexToBytes(orderHashHex), this.keyPair.secretKey);
-    // return bytesToHex(signature);
-  }
-  rawSign2(orderHashHex: string) {
-    const signature = sign(Buffer.from(orderHashHex, 'hex'), this.keyPair.secretKey)
-    return signature.toString('hex')
-    // const signature = nacl.sign.detached(hexToBytes(orderHashHex), this.keyPair.secretKey);
-    // return bytesToHex(signature);
-  }
-
-  createExtMsgBoc(
-    intMsgParams: {
-      toAddress: string
-      value: string
-      bounce?: boolean
-      init?: StateInit
-      body?: string | Cell
-    },
-    seqno: number,
-    opCode = 0,
-  ) {
-    const { toAddress, value, init, bounce = true, body } = intMsgParams
-    const intMsg = internal({
-      to: Address.parse(toAddress), // Send TON to this address
-      value: toNano(value),
-      init,
-      bounce,
-      body,
-    })
-    const msg = beginCell()
-      .storeUint(this.contract.walletId, 32)
-      .storeUint(0xFFFFFFFF, 32)
-      .storeUint(seqno, 32)
-      .storeUint(opCode, 8)
-      .storeUint(SendMode.PAY_GAS_SEPARATELY, 8)
-      .storeRef(beginCell().store(storeMessageRelaxed(intMsg)))
-
-    const signedMsg = {
-      builder: msg,
-      cell: msg.endCell(),
-    }
-    const extMsgBody = beginCell()
-      .storeBuffer(sign(signedMsg.cell.hash(), this.keyPair.secretKey))
-      .storeBuilder(signedMsg.builder)
-      .endCell()
-
-    const extMsg = external({
-      to: this.contract.address,
-      init: this.contract.init,
-      body: extMsgBody,
-    })
-
-    const extMsgCell = beginCell()
-      .store(storeMessage(extMsg))
-      .endCell()
-
-    return {
-      boc: extMsgCell.toBoc(),
-      string: extMsgCell.toBoc().toString('base64'),
-      message: extMsg,
-      extMsgBody,
     }
   }
 }
@@ -280,13 +184,12 @@ async function main() {
   }
 
   for (const m of ledgerMnemonics) {
-    //TODO: make it multi-type
     let index = 0
     let found = false
     switch (m.type) {
       case WalletType.NormalV4:
         const keyPair = await mnemonicToPrivateKey(m.mnemonic.split(' '))
-        const wallet = new Wallet(keyPair)
+        const wallet = new Wallet(keyPair, WalletType.NormalV4)
         wallets.push({wallet, index: m.index})
         break;
       case WalletType.Ledger:
@@ -300,7 +203,7 @@ async function main() {
             const publicKeyHex = keyPair.publicKey.toString('hex')
             console.log(`Found the keypair for the target address ${m.nonBounceableAddress}`)
             console.log(`Public key: ${publicKeyHex}`)
-            const wallet = new Wallet(keyPair)
+            const wallet = new Wallet(keyPair, WalletType.Ledger)
             wallets.push({wallet, index: m.index})
             found = true
           }
@@ -318,7 +221,7 @@ async function main() {
             const publicKeyHex = keyPair.publicKey.toString('hex')
             console.log(`Found the keypair for the target address ${m.nonBounceableAddress}`)
             console.log(`Public key: ${publicKeyHex}`)
-            const wallet = new Wallet(keyPair)
+            const wallet = new Wallet(keyPair, WalletType.MyTonWalletMultiChain)
             wallets.push({wallet, index: m.index})
             found = true
           }
