@@ -32,11 +32,11 @@ async function extractKeysFromMyTonWalletMultiChainMnemonic(mnemonic: string, in
 }
 
 class Wallet {
-  contract: WalletContractV4|WalletContractV5R1
+  contract: WalletContractV4 | WalletContractV5R1
   keyPair: KeyPair
 
   constructor(keyPair: KeyPair, type: WalletType) {
-    if(type === WalletType.NormalV4 ||type ===  WalletType.Ledger){
+    if(type === WalletType.NormalV4 || type === WalletType.Ledger){
       const wallet = WalletContractV4.create({
         workchain: 0,
         publicKey: keyPair.publicKey,
