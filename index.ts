@@ -153,7 +153,7 @@ async function main() {
 
   for (let i = 0; i < thresholds; i++) {
     const type = await rawlist({ 
-      message: `What's your wallet type?`,
+      message: `What's your ${i+1}th wallet type?`,
       choices: [
         {
           name: 'normal',
@@ -171,12 +171,21 @@ async function main() {
     });
     const mnemonic = await password({ message: `Enter the mnemonic of the key:`, mask: true});
     const nonBounceableAddress = await input({ message: `Enter the non-bounceable address of the key:` });
-    const index = await input({ message: `Enter the index of the key:` });
+
+    const index = await rawlist({ 
+      message: `Enter the order of the key:`,
+      choices: Array(thresholds).fill(0).map((_, i) => {
+        return {
+          name: `${i+1}`,
+          value: i
+        }
+      }),
+    });
 
     const result = {
       mnemonic,
       nonBounceableAddress,
-      index: parseInt(index),
+      index,
       type
     }
 
